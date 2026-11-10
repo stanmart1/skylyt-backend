@@ -10,6 +10,13 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from app.core.config import settings
 from app.core.database import Base
+
+# Normalize postgres:// -> postgresql:// for SQLAlchemy 2.0 compatibility
+_db_url = settings.DATABASE_URL
+if _db_url.startswith("postgres://"):
+    _db_url = _db_url.replace("postgres://", "postgresql://", 1)
+elif _db_url.startswith("postgres+"):
+    _db_url = _db_url.replace("postgres+", "postgresql+", 1)
 from app.models import user, booking, search_history, payment, favorite
 
 # this is the Alembic Config object, which provides
@@ -33,7 +40,7 @@ target_metadata = Base.metadata
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
-    url = settings.DATABASE_URL
+    url = _db_url
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -48,7 +55,7 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
     configuration = config.get_section(config.config_ini_section)
-    configuration["sqlalchemy.url"] = settings.DATABASE_URL
+    configuration["sqlalchemy.url"] = _db_url
     
     connectable = engine_from_config(
         configuration,

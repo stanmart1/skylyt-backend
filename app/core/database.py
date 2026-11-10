@@ -10,10 +10,19 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 print("=== DATABASE.PY LOADING ===")
 
+# Normalize DB URL: SQLAlchemy 2.0 removed the "postgres" dialect alias,
+# so convert postgres:// (and postgres+driver://) to postgresql://
+_raw_database_url = settings.DATABASE_URL
+if _raw_database_url.startswith("postgres://"):
+    _raw_database_url = _raw_database_url.replace("postgres://", "postgresql://", 1)
+elif _raw_database_url.startswith("postgres+"):
+    _raw_database_url = _raw_database_url.replace("postgres+", "postgresql+", 1)
+DATABASE_URL = _raw_database_url
+
 # Enhanced database engine with aggressive timeout handling
 def get_connection_args():
     """Get database connection arguments based on database type"""
-    if "postgresql" in settings.DATABASE_URL:
+    if "postgresql" in DATABASE_URL:
         return {
             "connect_timeout": 20,
             "keepalives_idle": 120,  # Reduced to 2 minutes for faster detection
@@ -43,11 +52,11 @@ def get_pool_config():
         return 100, 50
 
 # Fixed pool configuration with logging
-logger.info(f"Database URL: {settings.DATABASE_URL[:50]}...")
+logger.info(f"Database URL: {DATABASE_URL[:50]}...")
 logger.info(f"Creating engine with pool_size=100, max_overflow=50")
 
 # Remove any pool parameters from DATABASE_URL
-clean_db_url = settings.DATABASE_URL.split('?')[0]
+clean_db_url = DATABASE_URL.split('?')[0]
 logger.info(f"Clean DB URL: {clean_db_url[:50]}...")
 
 engine = create_engine(
@@ -77,14 +86,14 @@ Base = declarative_base()
 # Database connection optimization
 @event.listens_for(engine, "connect")
 def set_sqlite_pragma(dbapi_connection, connection_record):
-    if "sqlite" in settings.DATABASE_URL:
+    if "sqlite" in DATABASE_URL:
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
 @event.listens_for(engine, "connect")
 def set_postgresql_search_path(dbapi_connection, connection_record):
-    if "postgresql" in settings.DATABASE_URL:
+    if "postgresql" in DATABASE_URL:
         cursor = dbapi_connection.cursor()
         cursor.execute("SET search_path TO public")
         cursor.close()
@@ -127,7 +136,7 @@ def receive_invalidate(dbapi_connection, connection_record, exception):
 @event.listens_for(engine, "connect")
 def set_connection_parameters(dbapi_connection, connection_record):
     """Set connection-level parameters for better timeout handling"""
-    if "postgresql" in settings.DATABASE_URL:
+    if "postgresql" in DATABASE_URL:
         try:
             with dbapi_connection.cursor() as cursor:
                 # Set connection-level timeouts
