@@ -65,9 +65,24 @@ async def lifespan(app: FastAPI):
         try:
             from alembic.config import Config
             from alembic import command
+            from sqlalchemy import inspect
+            from app.core.database import Base, engine
+
             alembic_cfg = Config("alembic.ini")
-            command.upgrade(alembic_cfg, "head")
-            startup_logger.info("Database migrations completed successfully")
+            inspector = inspect(engine)
+
+            # On a fresh database the core tables don't exist yet and the
+            # migration chain only contains incremental changes, so create
+            # the full schema first and stamp alembic to head. Otherwise
+            # just run pending migrations.
+            if not inspector.has_table("alembic_version"):
+                startup_logger.info("Fresh database detected - creating all tables")
+                Base.metadata.create_all(bind=engine)
+                command.stamp(alembic_cfg, "head")
+                startup_logger.info("Tables created and alembic stamped to head")
+            else:
+                command.upgrade(alembic_cfg, "head")
+                startup_logger.info("Database migrations completed successfully")
         except Exception as e:
             startup_logger.error(f"Migration failed: {e}")
             # Continue startup even if migration fails
