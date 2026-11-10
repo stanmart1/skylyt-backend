@@ -1,0 +1,483 @@
+from fastapi import FastAPI, Request, Depends, UploadFile, File, HTTPException
+from fastapi.responses import PlainTextResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from contextlib import asynccontextmanager
+from sqlalchemy.orm import Session
+from pydantic import BaseModel, validator
+from typing import List, Optional
+import logging
+import re
+from datetime import datetime, timezone
+from werkzeug.utils import secure_filename
+from app.core.config import settings as config_settings
+from app.core.database import engine, reset_connection_pool, check_database_health
+from app.models import Base
+from app.middleware import SecurityMiddleware, MonitoringMiddleware, setup_cors
+from app.middleware.security import SecurityHeadersMiddleware
+from app.middleware.database import DatabaseMiddleware
+
+from app.middleware.performance import PerformanceMiddleware
+from app.middleware.compression import ResponseCompressionMiddleware
+from app.middleware.security_hardening import (
+    RequestValidationMiddleware, 
+    HTTPSRedirectMiddleware, 
+    SecurityHeadersMiddleware
+)
+from app.middleware.db_monitoring import DatabaseMonitoringMiddleware
+from app.middleware.dynamic_rate_limit import DynamicRateLimitMiddleware
+from app.monitoring.error_tracking import ErrorHandlingMiddleware, error_tracker
+from app.utils.logger import setup_logging
+from app.utils.cache import cache_warmer
+from app.api.v1 import auth, users, hotels, cars, search, bookings, rbac, health, admin_cars, admin_hotels, roles, permissions, settings, emails, destinations, hotel_images, car_images, localization, payment_webhooks, payment_config, currency_rates, currencies, footer_settings, contact_settings, about_settings, seo, health_check, rate_limit_test, cache
+from app.api.v1 import payments, bank_accounts, admin_reviews, admin_support, admin_notifications, notifications, drivers, admin_bookings, admin_payments, admin_stats, driver
+from app.api.v1 import misc
+from app.core.openapi import custom_openapi
+from app.core.redis import RedisService
+from app.core.storage import StorageManager
+from app.services.performance_monitor import performance_monitor
+
+# Setup logging
+setup_logging()
+
+# Performance monitoring logger
+perf_logger = logging.getLogger("performance")
+
+# Constants
+ALLOWED_UPLOAD_FOLDERS = ["general", "hotels", "cars", "payment_proofs", "documents"]
+ALLOWED_FILE_TYPES = ["image/jpeg", "image/png", "image/gif", "application/pdf"]
+ALLOWED_FILE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".gif", ".pdf"]
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+DEFAULT_COMMISSION_RATE = 10.0
+
+# Import utility functions
+from app.utils.serializers import serialize_booking, serialize_payment, parse_date_string
+from app.utils.validators import validate_financial_data, VALID_BOOKING_STATUSES, VALID_CURRENCIES
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    startup_logger = logging.getLogger("startup")
+    startup_logger.info("Starting Skylyt Luxury API...")
+    
+    try:
+        # Run database migrations automatically on startup
+        try:
+            from alembic.config import Config
+            from alembic import command
+            alembic_cfg = Config("alembic.ini")
+            command.upgrade(alembic_cfg, "head")
+            startup_logger.info("Database migrations completed successfully")
+        except Exception as e:
+            startup_logger.error(f"Migration failed: {e}")
+            # Continue startup even if migration fails
+            startup_logger.warning("Continuing startup despite migration failure")
+        
+        # Check database health before starting
+        db_health = check_database_health()
+        if db_health['status'] != 'healthy':
+            startup_logger.error(f"Database health check failed: {db_health}")
+            raise Exception("Database not healthy")
+        
+        startup_logger.info(f"Database connected successfully in {db_health['connection_time']}ms")
+
+        # Run essential database seeding (super admin, roles, permissions)
+        try:
+            from init_database import (
+                create_initial_permissions,
+                create_initial_roles,
+                create_admin_user,
+            )
+            create_initial_permissions()
+            create_initial_roles()
+            create_admin_user()
+            startup_logger.info("Essential database seeding completed")
+        except Exception as e:
+            startup_logger.error(f"Database seeding failed: {e}")
+
+        # Ensure storage directories exist
+        StorageManager.ensure_directory(StorageManager.BASE_STORAGE_PATH)
+        for category in ["hotels", "cars", "general", "payment_proofs", "documents"]:
+            StorageManager.ensure_directory(StorageManager.get_storage_path(category))
+        startup_logger.info("Storage directories initialized")
+        
+        # Initialize Redis/Dragonfly connection with retry
+        redis_attempts = 3
+        for attempt in range(redis_attempts):
+            try:
+                redis_client = RedisService.get_client()
+                if redis_client:
+                    startup_logger.info("Redis/Dragonfly initialized successfully")
+                    break
+                else:
+                    startup_logger.warning(f"Redis connection attempt {attempt + 1} failed")
+            except Exception as e:
+                startup_logger.warning(f"Redis initialization attempt {attempt + 1} failed: {e}")
+                if attempt == redis_attempts - 1:
+                    startup_logger.error("Redis initialization failed after all attempts, continuing without cache")
+        
+        # Warm cache with static data
+        try:
+            await cache_warmer.warm_static_data()
+            startup_logger.info("Cache warmed with static data")
+        except Exception as e:
+            startup_logger.warning(f"Cache warming failed: {e}")
+        
+        # Log startup performance metrics
+        try:
+            from app.core.database import SessionLocal
+            db = SessionLocal()
+            startup_metrics = performance_monitor.get_performance_summary(db)
+            perf_logger.info(f"Startup performance: {startup_metrics}")
+            db.close()
+        except Exception as e:
+            startup_logger.warning(f"Failed to get startup metrics: {e}")
+        
+        startup_logger.info("✅ Skylyt Luxury API started successfully")
+        
+    except Exception as e:
+        startup_logger.error(f"❌ Failed to start application: {e}")
+        raise
+    
+    yield
+    
+    # Shutdown
+    shutdown_logger = logging.getLogger("shutdown")
+    shutdown_logger.info("Shutting down Skylyt Luxury API...")
+    
+    try:
+        # Reset connection pool to ensure clean shutdown
+        reset_connection_pool()
+        shutdown_logger.info("Database connections closed")
+        
+        # Close Redis connections
+        try:
+            redis_client = RedisService.get_client()
+            if redis_client:
+                redis_client.close()
+                shutdown_logger.info("Redis connections closed")
+        except Exception as e:
+            shutdown_logger.warning(f"Error closing Redis connections: {e}")
+        
+        shutdown_logger.info("✅ Shutdown completed successfully")
+        
+    except Exception as e:
+        shutdown_logger.error(f"❌ Error during shutdown: {e}")
+
+app = FastAPI(
+    title="Skylyt Luxury API",
+    description="""A comprehensive booking platform API for luxury car rentals and hotel reservations.
+    
+    ## Features
+    * **Authentication** - JWT-based user authentication and authorization with role-based access control
+    * **Hotels** - Search, filter, and book hotel accommodations with real-time availability
+    * **Cars** - Browse and rent luxury vehicles with fleet management capabilities
+    * **Bookings** - Complete booking lifecycle management with status tracking
+    * **Payments** - Secure multi-gateway payment processing (Stripe, Flutterwave, Paystack, PayPal)
+    * **Admin** - Comprehensive administrative dashboard with analytics and reporting
+    * **Localization** - Multi-currency support with real-time exchange rates
+    * **Background Jobs** - Asynchronous processing for emails, payments, and maintenance tasks
+    
+    ## Authentication
+    Most endpoints require authentication using JWT Bearer tokens. Obtain a token by calling the `/auth/login` endpoint.
+    
+    ## Rate Limiting
+    API endpoints are rate-limited to ensure fair usage. Check response headers for rate limit information.
+    
+    ## Error Handling
+    The API uses standard HTTP status codes and returns detailed error messages in JSON format.
+    """,
+    version="1.0.0",
+    
+    license_info={
+        "name": "Private",
+    },
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_tags=[
+        {"name": "Authentication", "description": "User authentication, registration, and password management"},
+        {"name": "Users", "description": "User profile management and account settings"},
+        {"name": "Hotels", "description": "Hotel search, filtering, and booking operations"},
+        {"name": "Cars", "description": "Car rental search, booking, and fleet management"},
+        {"name": "Bookings", "description": "Booking lifecycle management and history tracking"},
+        {"name": "Payments", "description": "Multi-gateway payment processing and transaction management"},
+        {"name": "Admin", "description": "Administrative operations, analytics, and system management"},
+        {"name": "Health", "description": "System health monitoring and diagnostics"},
+        {"name": "Currencies", "description": "Currency management and exchange rate operations"},
+        {"name": "Notifications", "description": "User notification management and preferences"},
+    ],
+    lifespan=lifespan
+)
+
+# Configure custom OpenAPI to exclude database schemas
+app.openapi = lambda: custom_openapi(app)
+
+# Remove CSP completely for docs pages
+@app.middleware("http")
+async def fast_options_handler(request, call_next):
+    # Handle OPTIONS requests immediately without processing through other middleware
+    if request.method == "OPTIONS":
+        from fastapi.responses import Response
+        return Response(
+            status_code=200,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, HEAD",
+                "Access-Control-Allow-Headers": "*",
+                "Access-Control-Max-Age": "86400"
+            }
+        )
+    
+    response = await call_next(request)
+    if request.url.path in ["/docs", "/redoc", "/openapi.json"]:
+        # Remove ALL CSP headers completely
+        headers_to_remove = []
+        for header_name in list(response.headers.keys()):
+            if "content-security-policy" in header_name.lower():
+                headers_to_remove.append(header_name)
+        for header in headers_to_remove:
+            response.headers.pop(header, None)
+    return response
+
+
+
+# CORS - Add explicit CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:8080", 
+        "http://127.0.0.1:8080", 
+        "https://skylytluxury.com",
+        "https://api.skylytluxury.com",
+        "http://localhost:5173",
+        "http://localhost:4173",  # Vite dev server
+        "http://localhost:3000",   # Alternative dev port
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
+    allow_headers=["*"],
+)
+
+# Middleware (order matters - last added is executed first)
+
+# Error handling (outermost)
+app.add_middleware(ErrorHandlingMiddleware, error_tracker=error_tracker)
+
+# Performance middleware - optimized compression
+app.add_middleware(GZipMiddleware, minimum_size=500)
+app.add_middleware(PerformanceMiddleware)
+
+# Database connection handling
+app.add_middleware(DatabaseMiddleware)
+app.add_middleware(DatabaseMonitoringMiddleware)
+
+# Connection monitoring
+from app.middleware.connection_monitor import ConnectionMonitoringMiddleware
+app.add_middleware(ConnectionMonitoringMiddleware)
+
+# Rate limiting
+app.add_middleware(DynamicRateLimitMiddleware)
+
+# Security and monitoring
+app.add_middleware(SecurityMiddleware)
+app.add_middleware(MonitoringMiddleware)
+
+
+# Routes
+app.include_router(auth.router, prefix="/api/v1", tags=["Authentication"])
+app.include_router(users.router, prefix="/api/v1", tags=["Users"])
+app.include_router(hotels.router, prefix="/api/v1", tags=["Hotels"])
+app.include_router(cars.router, prefix="/api/v1", tags=["Cars"])
+app.include_router(search.router, prefix="/api/v1", tags=["Search"])
+app.include_router(bookings.router, prefix="/api/v1", tags=["Bookings"])
+app.include_router(payments.router, prefix="/api/v1", tags=["Payments"])
+app.include_router(bank_accounts.router, prefix="/api/v1", tags=["Bank Accounts"])
+app.include_router(rbac.router, prefix="/api/v1", tags=["RBAC"])
+app.include_router(health.router, prefix="/api/v1", tags=["Health"])
+app.include_router(health_check.router, prefix="/api/v1", tags=["Health Check"])
+app.include_router(notifications.router, prefix="/api/v1", tags=["Notifications"])
+app.include_router(admin_cars.router, prefix="/api/v1", tags=["Admin Cars"])
+app.include_router(admin_hotels.router, prefix="/api/v1", tags=["Admin Hotels"])
+app.include_router(roles.router, prefix="/api/v1", tags=["Roles"])
+app.include_router(permissions.router, prefix="/api/v1", tags=["Permissions"])
+app.include_router(settings.router, prefix="/api/v1", tags=["Settings"])
+app.include_router(emails.router, prefix="/api/v1", tags=["Emails"])
+app.include_router(destinations.router, prefix="/api/v1", tags=["Destinations"])
+app.include_router(hotel_images.router, prefix="/api/v1", tags=["Hotel Images"])
+app.include_router(car_images.router, prefix="/api/v1", tags=["Car Images"])
+app.include_router(localization.router, prefix="/api/v1", tags=["Localization"])
+app.include_router(payment_webhooks.router, prefix="/api/v1", tags=["Payment Webhooks"])
+app.include_router(payment_config.router, prefix="/api/v1", tags=["Payment Config"])
+app.include_router(admin_reviews.router, prefix="/api/v1", tags=["Admin Reviews"])
+app.include_router(admin_support.router, prefix="/api/v1", tags=["Admin Support"])
+app.include_router(admin_notifications.router, prefix="/api/v1", tags=["Admin Notifications"])
+app.include_router(currency_rates.router, prefix="/api/v1", tags=["Currency Rates"])
+app.include_router(currencies.router, prefix="/api/v1", tags=["Currencies"])
+app.include_router(drivers.router, prefix="/api/v1", tags=["Drivers"])
+app.include_router(driver.router, prefix="/api/v1", tags=["Driver Dashboard"])
+app.include_router(admin_bookings.router, prefix="/api/v1", tags=["Admin Bookings"])
+app.include_router(admin_payments.router, prefix="/api/v1", tags=["Admin Payments"])
+app.include_router(admin_stats.router, prefix="/api/v1", tags=["Admin Stats"])
+app.include_router(footer_settings.router, prefix="/api/v1", tags=["Footer Settings"])
+app.include_router(contact_settings.router, prefix="/api/v1", tags=["Contact Settings"])
+app.include_router(about_settings.router, prefix="/api/v1", tags=["About Settings"])
+app.include_router(seo.router, prefix="/api/v1", tags=["SEO"])
+app.include_router(rate_limit_test.router, prefix="/api/v1", tags=["Rate Limit"])
+app.include_router(cache.router, prefix="/api/v1", tags=["Cache"])
+app.include_router(misc.router, prefix="/api/v1", tags=["Misc"])
+
+
+# Simple image serving endpoint without security middleware
+@app.get("/uploads/{folder}/{filename}")
+async def serve_image(folder: str, filename: str):
+    """Serve images with proper CORS headers"""
+    from fastapi.responses import FileResponse
+    from pathlib import Path
+    from os.path import normpath, commonpath
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    # Validate folder and filename to prevent path traversal
+    if folder not in ALLOWED_UPLOAD_FOLDERS:
+        raise HTTPException(status_code=400, detail="Invalid folder")
+    
+    # Sanitize filename
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    
+    # Use centralized storage manager
+    file_path = StorageManager.get_storage_path(folder) / filename
+    base_path = StorageManager.get_storage_path(folder)
+    
+    # Ensure the resolved path is within uploads directory
+    try:
+        file_path = file_path.resolve()
+        if not str(file_path).startswith(str(base_path)):
+            raise HTTPException(status_code=400, detail="Invalid path")
+    except (OSError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    
+    safe_path = re.sub(r'[\r\n]', '', str(file_path))
+    logger.info(f"Serving file: {safe_path}")
+    
+    if file_path.exists() and file_path.is_file():
+        # Determine media type based on file extension
+        suffix = file_path.suffix.lower()
+        media_type_map = {
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg', 
+            '.jpeg': 'image/jpeg',
+            '.gif': 'image/gif',
+            '.pdf': 'application/pdf'
+        }
+        media_type = media_type_map.get(suffix, "application/octet-stream")
+        
+        # Use FileResponse for memory efficiency with lazy loading support
+        return FileResponse(
+            path=file_path,
+            media_type=media_type,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET",
+                "Access-Control-Allow-Headers": "*",
+                "Cache-Control": "public, max-age=3600",
+                "X-Content-Type-Options": "nosniff",
+                "Loading": "lazy"
+            }
+        )
+    else:
+        safe_path = re.sub(r'[\r\n]', '', str(file_path))
+        logger.warning(f"File not found: {safe_path}")
+        raise HTTPException(status_code=404, detail="Image not found")
+
+# Additional endpoints for frontend compatibility
+from app.core.dependencies import get_current_user
+from app.core.database import get_db
+
+# Import schemas
+from app.schemas.booking import BookingStatusUpdate, BookingCreateRequest, BookingUpdateRequest, CancelBookingRequest, BulkDeleteRequest
+from app.schemas.car import CarCreateRequest
+from app.schemas.payment import PaymentUpdateRequest, RefundRequest
+
+# Booking status endpoints moved to admin_bookings.py
+
+# Admin booking endpoints moved to admin_bookings.py
+
+# Admin payment endpoints moved to admin_payments.py
+
+# Admin system, analytics, and notification endpoints moved to respective router files
+
+@app.post("/api/v1/upload")
+async def upload_file(file: UploadFile = File(...), upload_type: str = "general", current_user = Depends(get_current_user)):
+    """Upload file with centralized storage"""
+    from uuid import uuid4
+    from pathlib import Path
+    from app.core.storage import StorageManager
+    
+    # Validate upload type
+    if upload_type not in ALLOWED_UPLOAD_FOLDERS:
+        raise HTTPException(status_code=400, detail="Invalid upload type")
+    
+    # Validate file type and size
+    if file.content_type not in ALLOWED_FILE_TYPES:
+        raise HTTPException(status_code=400, detail="File type not allowed")
+    
+    file_extension = Path(file.filename).suffix.lower()
+    if file_extension not in ALLOWED_FILE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="File extension not allowed")
+    
+    if file.size and file.size > MAX_FILE_SIZE:
+        raise HTTPException(status_code=400, detail="File too large")
+    
+    # Generate secure filename and get storage path
+    secure_name = f"{uuid4()}{file_extension}"
+    file_path = StorageManager.get_upload_path(upload_type, secure_name)
+    
+    # Save file with streaming to avoid memory issues
+    with open(file_path, "wb") as buffer:
+        while chunk := await file.read(8192):  # 8KB chunks
+            buffer.write(chunk)
+    
+    return {"url": StorageManager.get_serve_url(upload_type, secure_name), "filename": secure_name}
+
+@app.options("/{path:path}")
+async def options_handler(path: str):
+    """Handle CORS preflight requests"""
+    return {"message": "OK"}
+
+@app.get("/")
+async def root():
+    return {"message": "Skylyt Luxury API", "version": "1.0.0"}
+
+@app.get("/robots.txt", response_class=PlainTextResponse)
+async def robots_txt():
+    """Serve robots.txt from root"""
+    return """User-agent: *
+Allow: /
+Allow: /api/v1/hotels/
+Allow: /api/v1/cars/
+Allow: /uploads/
+
+Disallow: /api/v1/admin/
+Disallow: /api/v1/auth/
+Disallow: /api/v1/payments/
+Disallow: /docs
+Disallow: /redoc
+
+Sitemap: https://skylytluxury.com/api/v1/seo/sitemap.xml
+
+# Crawl-delay for respectful crawling
+Crawl-delay: 1"""
+
+@app.get("/sitemap.xml", response_class=PlainTextResponse)
+async def sitemap_xml(db: Session = Depends(get_db)):
+    """Serve sitemap.xml from root"""
+    from app.api.v1.seo import generate_sitemap
+    return await generate_sitemap(db)
+
+# Admin car, stats, payment, and review endpoints moved to respective router files
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payment Confirmation - Skylyt Luxury</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #374151; background-color: #f8fafc;">
+    <div style="max-width: 600px; margin: 0 auto; background: white; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
+        <!-- Header with Gradient -->
+        {% if payment.is_failed %}
+        <div style="background: linear-gradient(to right, #dc2626, #b91c1c, #991b1b); padding: 40px 30px; text-align: center;">
+            <h1 style="margin: 0; color: white; font-size: 28px; font-weight: 700; letter-spacing: -0.025em;">❌ Payment Failed</h1>
+            <p style="margin: 8px 0 0 0; color: rgba(255, 255, 255, 0.9); font-size: 16px;">Your transaction could not be processed</p>
+        </div>
+        {% else %}
+        <div style="background: linear-gradient(to right, #2563eb, #1d4ed8, #0d9488); padding: 40px 30px; text-align: center;">
+            <h1 style="margin: 0; color: white; font-size: 28px; font-weight: 700; letter-spacing: -0.025em;">✅ Payment Confirmed!</h1>
+            <p style="margin: 8px 0 0 0; color: rgba(255, 255, 255, 0.9); font-size: 16px;">Your transaction was successful</p>
+        </div>
+        {% endif %}
+        
+        <!-- Content -->
+        <div style="padding: 40px 30px;">
+            <p style="margin: 0 0 20px 0; font-size: 16px;">Dear {{ payment.user_name or user_name }},</p>
+            
+            {% if payment.is_failed %}
+            <p style="margin: 0 0 24px 0; font-size: 16px;">Unfortunately, your payment could not be processed. Please try again or contact our support team.</p>
+            {% else %}
+            <p style="margin: 0 0 24px 0; font-size: 16px;">Excellent! Your payment has been successfully processed and your booking is now confirmed.</p>
+            {% endif %}
+            
+            <!-- Payment Details Card -->
+            {% if payment.is_failed %}
+            <div style="background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border-radius: 12px; padding: 24px; margin: 24px 0; border-left: 4px solid #dc2626;">
+                <h3 style="margin: 0 0 20px 0; color: #1e293b; font-size: 20px; font-weight: 600;">❌ Payment Details</h3>
+            {% else %}
+            <div style="background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); border-radius: 12px; padding: 24px; margin: 24px 0; border-left: 4px solid #10b981;">
+                <h3 style="margin: 0 0 20px 0; color: #1e293b; font-size: 20px; font-weight: 600;">💳 Payment Details</h3>
+            {% endif %}
+                
+                <table style="width: 100%; border-collapse: collapse;">
+                    {% if payment.booking_reference or booking_reference %}
+                    <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid {% if payment.is_failed %}#fca5a5{% else %}#a7f3d0{% endif %};">
+                        <span style="font-weight: 600; color: {% if payment.is_failed %}#b91c1c{% else %}#047857{% endif %};">Booking Reference:</span>
+                        <span style="color: #1e293b; font-weight: 700;">{{ payment.booking_reference or booking_reference }}</span>
+                    </div>
+                    {% endif %}
+                    
+                    {% if payment.transaction_id or transaction_id %}
+                    <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid {% if payment.is_failed %}#fca5a5{% else %}#a7f3d0{% endif %};">
+                        <span style="font-weight: 600; color: {% if payment.is_failed %}#b91c1c{% else %}#047857{% endif %};">Transaction ID:</span>
+                        <span style="color: #1e293b; font-family: monospace;">{{ payment.transaction_id or transaction_id }}</span>
+                    </div>
+                    {% endif %}
+                    
+                    <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid {% if payment.is_failed %}#fca5a5{% else %}#a7f3d0{% endif %};">
+                        <span style="font-weight: 600; color: {% if payment.is_failed %}#b91c1c{% else %}#047857{% endif %};">Payment Method:</span>
+                        <span style="color: #1e293b;">{{ payment.payment_method or payment_method }}</span>
+                    </div>
+                    
+                    {% if payment.gateway or gateway %}
+                    <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid {% if payment.is_failed %}#fca5a5{% else %}#a7f3d0{% endif %};">
+                        <span style="font-weight: 600; color: {% if payment.is_failed %}#b91c1c{% else %}#047857{% endif %};">Payment Gateway:</span>
+                        <span style="color: #1e293b;">{{ payment.gateway or gateway }}</span>
+                    </div>
+                    {% endif %}
+                    
+                    {% if payment.processing_fee or processing_fee %}
+                    <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid {% if payment.is_failed %}#fca5a5{% else %}#a7f3d0{% endif %};">
+                        <span style="font-weight: 600; color: {% if payment.is_failed %}#b91c1c{% else %}#047857{% endif %};">Processing Fee:</span>
+                        <span style="color: #1e293b;">{{ payment.currency or currency }} {{ payment.processing_fee or processing_fee }}</span>
+                    </div>
+                    {% endif %}
+                    
+                    {% if payment.error_message %}
+                    <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #fca5a5;">
+                        <span style="font-weight: 600; color: #b91c1c;">Error:</span>
+                        <span style="color: #dc2626; font-weight: 600;">{{ payment.error_message }}</span>
+                    </div>
+                    {% elif payment.status or status %}
+                    <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid {% if payment.is_failed %}#fca5a5{% else %}#a7f3d0{% endif %};">
+                        <span style="font-weight: 600; color: {% if payment.is_failed %}#b91c1c{% else %}#047857{% endif %};">Status:</span>
+                        <span style="color: {% if payment.is_failed %}#dc2626{% else %}#10b981{% endif %}; font-weight: 600;">{{ payment.status or status }}</span>
+                    </div>
+                    {% endif %}
+                    
+                    {% if not payment.is_failed and (payment.subtotal or subtotal) %}
+                    <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #a7f3d0;">
+                        <span style="font-weight: 600; color: #047857;">Subtotal:</span>
+                        <span style="color: #1e293b;">{{ payment.currency or currency }} {{ payment.subtotal or subtotal }}</span>
+                    </div>
+                    {% endif %}
+                    
+                    {% if not payment.is_failed and (payment.taxes or taxes) %}
+                    <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #a7f3d0;">
+                        <span style="font-weight: 600; color: #047857;">Taxes & Fees:</span>
+                        <span style="color: #1e293b;">{{ payment.currency or currency }} {{ payment.taxes or taxes }}</span>
+                    </div>
+                    {% endif %}
+                    
+                    <tr style="background: white;">
+                        <td style="padding: 16px 0; font-weight: 700; color: #1e293b; font-size: 18px;">{% if payment.is_failed %}Amount Attempted:{% else %}Total Paid:{% endif %}</td>
+                        <td style="padding: 16px 0; color: {% if payment.is_failed %}#dc2626{% else %}#10b981{% endif %}; font-weight: 700; font-size: 18px; text-align: right;">{{ payment.currency or currency }} {{ payment.amount or amount }}</td>
+                    </tr>
+                </table>
+            </div>
+            
+            {% if payment.is_failed %}
+            <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 16px; margin: 24px 0;">
+                <p style="margin: 0; color: #dc2626; font-weight: 600;">🔄 What's Next?</p>
+                <p style="margin: 8px 0 0 0; color: #b91c1c;">Please try your payment again or contact our support team for assistance. Your booking is still pending payment.</p>
+            </div>
+            {% else %}
+            <div style="background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 16px; margin: 24px 0;">
+                <p style="margin: 0; color: #0369a1; font-weight: 600;">🎉 What's Next?</p>
+                <p style="margin: 8px 0 0 0; color: #075985;">Your booking is now confirmed! You should receive a separate booking confirmation email with all the details shortly.</p>
+            </div>
+            {% endif %}
+            
+            <div style="text-align: center; margin: 32px 0;">
+                <table style="margin: 0 auto;">
+                    <tr>
+                        {% if payment.is_failed %}
+                        <td style="padding-right: 8px;">
+                            <a href="https://skylytluxury.com/payment" style="background: linear-gradient(to right, #dc2626, #b91c1c); color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; font-size: 16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); min-width: 140px; text-align: center;">Retry Payment</a>
+                        </td>
+                        <td style="padding-left: 8px;">
+                            <a href="https://skylytluxury.com/contact" style="background: transparent; color: #475569; padding: 14px 32px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; font-size: 16px; border: 2px solid #e2e8f0; min-width: 140px; text-align: center;">Get Help</a>
+                        </td>
+                        {% else %}
+                        <td style="padding-right: 8px;">
+                            <a href="https://skylytluxury.com/booking/{{ payment.booking_id or booking_id }}" style="background: linear-gradient(to right, #f97316, #ea580c); color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; font-size: 16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); min-width: 140px; text-align: center;">View Booking</a>
+                        </td>
+                        <td style="padding-left: 8px;">
+                            <a href="https://skylytluxury.com/booking/{{ payment.booking_id or booking_id }}" style="background: transparent; color: #475569; padding: 14px 32px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; font-size: 16px; border: 2px solid #e2e8f0; min-width: 140px; text-align: center;">Get Receipt</a>
+                        </td>
+                        {% endif %}
+                    </tr>
+                </table>
+            </div>
+            
+            <p style="margin: 24px 0 0 0; font-size: 16px; color: #64748b;">Thank you for choosing Skylyt Luxury! We're excited to be part of your journey.</p>
+        </div>
+        
+        <!-- Footer -->
+        <div style="background: #f8fafc; padding: 24px 30px; text-align: center; border-top: 1px solid #e2e8f0;">
+            <p style="margin: 0; color: #64748b; font-size: 14px;">Best regards,<br><strong>The Skylyt Luxury Team</strong></p>
+        </div>
+    </div>
+</body>
+</html>
