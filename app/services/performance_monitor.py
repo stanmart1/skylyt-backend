@@ -209,7 +209,19 @@ class PerformanceMonitor:
             }
             
             metrics = {}
+            # Only run queries for tables that actually exist to avoid noisy errors
+            table_checks = {
+                'recent_bookings': 'bookings',
+                'recent_payments': 'payments',
+                'active_users': 'bookings',
+                'pending_payments': 'payments',
+                'failed_payments': 'payments',
+            }
             for key, query in recent_queries.items():
+                table_name = table_checks.get(key)
+                if table_name and not self._table_exists(db, table_name):
+                    metrics[key] = 0
+                    continue
                 try:
                     result = db.execute(text(query)).scalar()
                     metrics[key] = result or 0

@@ -83,9 +83,19 @@ async def lifespan(app: FastAPI):
             else:
                 command.upgrade(alembic_cfg, "head")
                 startup_logger.info("Database migrations completed successfully")
+
+            # Guarantee the full schema exists even if migrations were skipped
+            # or only partially applied (prevents "relation does not exist" errors).
+            Base.metadata.create_all(bind=engine)
+            startup_logger.info("Database schema ensured (create_all)")
         except Exception as e:
             startup_logger.error(f"Migration failed: {e}")
-            # Continue startup even if migration fails
+            # Fall back to creating whatever tables are missing so the app can run
+            try:
+                Base.metadata.create_all(bind=engine)
+                startup_logger.warning("Created missing tables via create_all after migration failure")
+            except Exception as create_err:
+                startup_logger.error(f"Failed to create tables: {create_err}")
             startup_logger.warning("Continuing startup despite migration failure")
         
         # Check database health before starting
