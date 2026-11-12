@@ -6,6 +6,12 @@ Create Date: 2024-01-01 14:00:00.000000
 
 """
 from alembic import op
+from app.migration_helpers import (
+    table_exists, column_exists, add_column_if_missing,
+    create_table_if_missing, create_index_if_missing,
+    drop_column_if_exists, rename_column_if_exists,
+)
+
 import sqlalchemy as sa
 
 # revision identifiers
@@ -16,7 +22,7 @@ depends_on = None
 
 def upgrade():
     # Add updated_at column to users table
-    op.add_column('users', sa.Column('updated_at', sa.DateTime(), nullable=True))
+    add_column_if_missing(op, 'users', sa.Column('updated_at', sa.DateTime(), nullable=True))
     
     # Update existing records with current timestamp
     op.execute("UPDATE users SET updated_at = created_at WHERE updated_at IS NULL")
@@ -25,4 +31,4 @@ def upgrade():
     op.alter_column('users', 'updated_at', nullable=False)
 
 def downgrade():
-    op.drop_column('users', 'updated_at')
+    drop_column_if_exists(op, 'users', 'updated_at')

@@ -21,18 +21,18 @@ def upgrade():
     op.execute("""
         UPDATE bookings 
         SET booking_data = jsonb_set(
-            booking_data, 
+            booking_data::jsonb, 
             '{destination}', 
-            COALESCE(booking_data->'dropoff_location', booking_data->'destination')
-        )
-        WHERE booking_data ? 'dropoff_location'
+            COALESCE(booking_data::jsonb->'dropoff_location', booking_data::jsonb->'destination')
+        )::json
+        WHERE booking_data::jsonb ? 'dropoff_location'
     """)
     
     # Remove the old dropoff_location key from booking_data
     op.execute("""
         UPDATE bookings 
-        SET booking_data = booking_data - 'dropoff_location'
-        WHERE booking_data ? 'dropoff_location'
+        SET booking_data = (booking_data::jsonb - 'dropoff_location')::json
+        WHERE booking_data::jsonb ? 'dropoff_location'
     """)
 
 
@@ -41,16 +41,16 @@ def downgrade():
     op.execute("""
         UPDATE bookings 
         SET booking_data = jsonb_set(
-            booking_data, 
+            booking_data::jsonb, 
             '{dropoff_location}', 
-            COALESCE(booking_data->'destination', booking_data->'dropoff_location')
-        )
-        WHERE booking_data ? 'destination'
+            COALESCE(booking_data::jsonb->'destination', booking_data::jsonb->'dropoff_location')
+        )::json
+        WHERE booking_data::jsonb ? 'destination'
     """)
     
     # Remove the destination key from booking_data
     op.execute("""
         UPDATE bookings 
-        SET booking_data = booking_data - 'destination'
-        WHERE booking_data ? 'destination'
+        SET booking_data = (booking_data::jsonb - 'destination')::json
+        WHERE booking_data::jsonb ? 'destination'
     """)

@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     
     # Frontend URL
     FRONTEND_URL: str = "https://skylyt.scaleitpro.com"
+
+    # Comma-separated list of allowed CORS origins (optional).
+    # When unset, the defaults in main.py are used.
+    CORS_ORIGINS: Optional[str] = None
     
     # External APIs
     STRIPE_SECRET_KEY: Optional[str] = None

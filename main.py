@@ -61,109 +61,94 @@ async def lifespan(app: FastAPI):
     startup_logger.info("Starting Skylyt Luxury API...")
     
     try:
-        # Run database migrations automatically on startup
+        # Run database migrations automatically on startup. The migration chain
+        # is idempotent (guarded DDL) and starts from a baseline schema revision,
+        # so this works on fresh and partially-migrated databases alike.
         try:
             from alembic.config import Config
             from alembic import command
-            from sqlalchemy import inspect
             from app.core.database import Base, engine
 
             alembic_cfg = Config("alembic.ini")
-            inspector = inspect(engine)
-
-            # On a fresh database the core tables don't exist yet and the
-            # migration chain only contains incremental changes, so create
-            # the full schema first and stamp alembic to head. Otherwise
-            # just run pending migrations.
-            if not inspector.has_table("alembic_version"):
-                startup_logger.info("Fresh database detected - creating all tables")
-                Base.metadata.create_all(bind=engine)
-                command.stamp(alembic_cfg, "head")
-                startup_logger.info("Tables created and alembic stamped to head")
-            else:
-                command.upgrade(alembic_cfg, "head")
-                startup_logger.info("Database migrations completed successfully")
-
-            # Guarantee the full schema exists even if migrations were skipped
-            # or only partially applied (prevents "relation does not exist" errors).
-            Base.metadata.create_all(bind=engine)
-            startup_logger.info("Database schema ensured (create_all)")
+            command.upgrade(alembic_cfg, "head")
+            startup_logger.info("Database migrations completed successfully")
         except Exception as e:
             startup_logger.error(f"Migration failed: {e}")
-            # Fall back to creating whatever tables are missing so the app can run
-            try:
-                Base.metadata.create_all(bind=engine)
-                startup_logger.warning("Created missing tables via create_all after migration failure")
-            except Exception as create_err:
-                startup_logger.error(f"Failed to create tables: {create_err}")
-            startup_logger.warning("Continuing startup despite migration failure")
-        
-        # Check database health before starting
-        db_health = check_database_health()
-        if db_health['status'] != 'healthy':
-            startup_logger.error(f"Database health check failed: {db_health}")
-            raise Exception("Database not healthy")
-        
-        startup_logger.info(f"Database connected successfully in {db_health['connection_time']}ms")
 
-        # Run essential database seeding (super admin, roles, permissions)
-        try:
-            from init_database import (
-                create_initial_permissions,
-                create_initial_roles,
-                create_admin_user,
-            )
-            create_initial_permissions()
-            create_initial_roles()
-            create_admin_user()
-            startup_logger.info("Essential database seeding completed")
-        except Exception as e:
-            startup_logger.error(f"Database seeding failed: {e}")
-
-        # Ensure storage directories exist
-        StorageManager.ensure_directory(StorageManager.BASE_STORAGE_PATH)
-        for category in ["hotels", "cars", "general", "payment_proofs", "documents"]:
-            StorageManager.ensure_directory(StorageManager.get_storage_path(category))
-        startup_logger.info("Storage directories initialized")
-        
-        # Initialize Redis/Dragonfly connection with retry
-        redis_attempts = 3
-        for attempt in range(redis_attempts):
-            try:
-                redis_client = RedisService.get_client()
-                if redis_client:
-                    startup_logger.info("Redis/Dragonfly initialized successfully")
-                    break
-                else:
-                    startup_logger.warning(f"Redis connection attempt {attempt + 1} failed")
-            except Exception as e:
-                startup_logger.warning(f"Redis initialization attempt {attempt + 1} failed: {e}")
-                if attempt == redis_attempts - 1:
-                    startup_logger.error("Redis initialization failed after all attempts, continuing without cache")
-        
-        # Warm cache with static data
-        try:
-            await cache_warmer.warm_static_data()
-            startup_logger.info("Cache warmed with static data")
-        except Exception as e:
-            startup_logger.warning(f"Cache warming failed: {e}")
-        
-        # Log startup performance metrics
-        try:
-            from app.core.database import SessionLocal
-            db = SessionLocal()
-            startup_metrics = performance_monitor.get_performance_summary(db)
-            perf_logger.info(f"Startup performance: {startup_metrics}")
-            db.close()
-        except Exception as e:
-            startup_logger.warning(f"Failed to get startup metrics: {e}")
-        
-        startup_logger.info("✅ Skylyt Luxury API started successfully")
-        
+        # Guarantee the full schema exists even if migrations were skipped
+        # or only partially applied (prevents "relation does not exist" errors).
+        Base.metadata.create_all(bind=engine)
+        startup_logger.info("Database schema ensured (create_all)")
     except Exception as e:
-        startup_logger.error(f"❌ Failed to start application: {e}")
-        raise
-    
+        startup_logger.error(f"Database initialization failed: {e}")
+        startup_logger.warning("Continuing startup despite initialization failure")
+
+    # Check database health before starting
+    db_health = check_database_health()
+    if db_health['status'] != 'healthy':
+        startup_logger.error(f"Database health check failed: {db_health}")
+        raise Exception("Database not healthy")
+
+    startup_logger.info(f"Database connected successfully in {db_health['connection_time']}ms")
+
+    # Run essential database seeding (super admin, roles, permissions, currencies)
+    try:
+        from init_database import (
+            create_initial_permissions,
+            create_initial_roles,
+            create_admin_user,
+        )
+        from app.services.currency_service import CurrencyService
+        from app.core.database import SessionLocal
+
+        create_initial_permissions()
+        create_initial_roles()
+        create_admin_user()
+        CurrencyService.seed_default_currencies(SessionLocal())
+        startup_logger.info("Essential database seeding completed")
+    except Exception as e:
+        startup_logger.error(f"Database seeding failed: {e}")
+
+    # Ensure storage directories exist
+    StorageManager.ensure_directory(StorageManager.BASE_STORAGE_PATH)
+    for category in ["hotels", "cars", "general", "payment_proofs", "documents"]:
+        StorageManager.ensure_directory(StorageManager.get_storage_path(category))
+    startup_logger.info("Storage directories initialized")
+
+    # Initialize Redis/Dragonfly connection with retry
+    redis_attempts = 3
+    for attempt in range(redis_attempts):
+        try:
+            redis_client = RedisService.get_client()
+            if redis_client:
+                startup_logger.info("Redis/Dragonfly initialized successfully")
+                break
+            else:
+                startup_logger.warning(f"Redis connection attempt {attempt + 1} failed")
+        except Exception as e:
+            startup_logger.warning(f"Redis initialization attempt {attempt + 1} failed: {e}")
+            if attempt == redis_attempts - 1:
+                startup_logger.error("Redis initialization failed after all attempts, continuing without cache")
+
+    # Warm cache with static data
+    try:
+        await cache_warmer.warm_static_data()
+        startup_logger.info("Cache warmed with static data")
+    except Exception as e:
+        startup_logger.warning(f"Cache warming failed: {e}")
+
+    # Log startup performance metrics
+    try:
+        from app.core.database import SessionLocal
+        db = SessionLocal()
+        startup_metrics = performance_monitor.get_performance_summary(db)
+        perf_logger.info(f"Startup performance: {startup_metrics}")
+        db.close()
+    except Exception as e:
+        startup_logger.warning(f"Failed to get startup metrics: {e}")
+
+    startup_logger.info("✅ Skylyt Luxury API started successfully")
+
     yield
     
     # Shutdown
@@ -237,22 +222,9 @@ app = FastAPI(
 # Configure custom OpenAPI to exclude database schemas
 app.openapi = lambda: custom_openapi(app)
 
-# Remove CSP completely for docs pages
+# Strip CSP headers for docs pages
 @app.middleware("http")
-async def fast_options_handler(request, call_next):
-    # Handle OPTIONS requests immediately without processing through other middleware
-    if request.method == "OPTIONS":
-        from fastapi.responses import Response
-        return Response(
-            status_code=200,
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, HEAD",
-                "Access-Control-Allow-Headers": "*",
-                "Access-Control-Max-Age": "86400"
-            }
-        )
-    
+async def strip_docs_csp(request, call_next):
     response = await call_next(request)
     if request.url.path in ["/docs", "/redoc", "/openapi.json"]:
         # Remove ALL CSP headers completely
@@ -265,27 +237,9 @@ async def fast_options_handler(request, call_next):
     return response
 
 
+# Middleware (order matters - last added is executed first / outermost)
 
-# CORS - Add explicit CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:8080", 
-        "http://127.0.0.1:8080", 
-        "https://skylytluxury.com",
-        "https://api.skylytluxury.com",
-        "http://localhost:5173",
-        "http://localhost:4173",  # Vite dev server
-        "http://localhost:3000",   # Alternative dev port
-    ],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
-    allow_headers=["*"],
-)
-
-# Middleware (order matters - last added is executed first)
-
-# Error handling (outermost)
+# Error handling
 app.add_middleware(ErrorHandlingMiddleware, error_tracker=error_tracker)
 
 # Performance middleware - optimized compression
@@ -306,6 +260,35 @@ app.add_middleware(DynamicRateLimitMiddleware)
 # Security and monitoring
 app.add_middleware(SecurityMiddleware)
 app.add_middleware(MonitoringMiddleware)
+
+# CORS must be added LAST so it is the OUTERMOST middleware. Every response —
+# including the 500s synthesized by DatabaseMiddleware and other middleware
+# above — then passes through CORSMiddleware and gets proper CORS headers.
+# Without this, error responses are invisible to the browser and get reported
+# as CORS failures.
+_default_cors_origins = [
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+    "https://skylytluxury.com",
+    "https://www.skylytluxury.com",
+    "https://api.skylytluxury.com",
+    "http://localhost:5173",
+    "http://localhost:4173",  # Vite dev server
+    "http://localhost:3000",  # Alternative dev port
+]
+_cors_origins_env = getattr(config_settings, "CORS_ORIGINS", None)
+_cors_origins = (
+    [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
+    if _cors_origins_env
+    else _default_cors_origins
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
+    allow_headers=["*"],
+)
 
 
 # Routes

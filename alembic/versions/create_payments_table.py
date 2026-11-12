@@ -6,6 +6,13 @@ Create Date: 2025-09-03 20:51:00.000000
 
 """
 from alembic import op
+
+from app.migration_helpers import (
+    table_exists, column_exists, add_column_if_missing,
+    create_table_if_missing, create_index_if_missing,
+    drop_column_if_exists, rename_column_if_exists,
+)
+
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
@@ -17,7 +24,7 @@ depends_on = None
 
 def upgrade():
     # Create payments table
-    op.create_table('payments',
+    create_table_if_missing(op, 'payments',
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
         sa.Column('booking_id', sa.Integer(), nullable=False),
         sa.Column('amount', sa.Numeric(precision=15, scale=2), nullable=False),
@@ -41,7 +48,7 @@ def upgrade():
         sa.ForeignKeyConstraint(['booking_id'], ['bookings.id'], ),
         sa.PrimaryKeyConstraint('id')
     )
-    op.create_index(op.f('ix_payments_id'), 'payments', ['id'], unique=False)
+    create_index_if_missing(op, op.f('ix_payments_id'), 'payments', ['id'], unique=False)
 
 def downgrade():
     op.drop_index(op.f('ix_payments_id'), table_name='payments')

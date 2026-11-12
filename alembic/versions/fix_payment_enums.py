@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = 'fix_payment_enums'
-down_revision = None
+down_revision = '00_baseline_schema'
 branch_labels = None
 depends_on = None
 

@@ -6,6 +6,13 @@ Create Date: 2025-09-03 09:47:53.558429
 
 """
 from alembic import op
+
+from app.migration_helpers import (
+    table_exists, column_exists, add_column_if_missing,
+    create_table_if_missing, create_index_if_missing,
+    drop_column_if_exists, rename_column_if_exists,
+)
+
 import sqlalchemy as sa
 
 
@@ -17,7 +24,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.create_table('contact_messages',
+    create_table_if_missing(op, 'contact_messages',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('name', sa.String(length=100), nullable=False),
         sa.Column('email', sa.String(length=100), nullable=False),
@@ -28,7 +35,7 @@ def upgrade() -> None:
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
         sa.PrimaryKeyConstraint('id')
     )
-    op.create_index(op.f('ix_contact_messages_id'), 'contact_messages', ['id'], unique=False)
+    create_index_if_missing(op, op.f('ix_contact_messages_id'), 'contact_messages', ['id'], unique=False)
 
 
 def downgrade() -> None:

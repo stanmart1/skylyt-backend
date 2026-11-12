@@ -6,6 +6,13 @@ Create Date: 2024-01-01 16:00:00.000000
 
 """
 from alembic import op
+
+from app.migration_helpers import (
+    table_exists, column_exists, add_column_if_missing,
+    create_table_if_missing, create_index_if_missing,
+    drop_column_if_exists, rename_column_if_exists,
+)
+
 import sqlalchemy as sa
 
 # revision identifiers
@@ -16,7 +23,7 @@ depends_on = None
 
 def upgrade():
     # Create settings table
-    op.create_table('settings',
+    create_table_if_missing(op, 'settings',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('created_at', sa.DateTime(), nullable=False),
         sa.Column('updated_at', sa.DateTime(), nullable=False),

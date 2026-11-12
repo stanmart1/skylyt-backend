@@ -6,19 +6,26 @@ Create Date: 2024-01-01 00:00:00.000000
 
 """
 from alembic import op
+
+from app.migration_helpers import (
+    table_exists, column_exists, add_column_if_missing,
+    create_table_if_missing, create_index_if_missing,
+    drop_column_if_exists, rename_column_if_exists,
+)
+
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = 'add_contact_about_settings'
-down_revision = None
+down_revision = '00_baseline_schema'
 branch_labels = None
 depends_on = None
 
 
 def upgrade():
     # Create contact_settings table
-    op.create_table('contact_settings',
+    create_table_if_missing(op, 'contact_settings',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('page_title', sa.String(length=200), nullable=True),
         sa.Column('page_description', sa.Text(), nullable=True),
@@ -30,10 +37,10 @@ def upgrade():
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
         sa.PrimaryKeyConstraint('id')
     )
-    op.create_index(op.f('ix_contact_settings_id'), 'contact_settings', ['id'], unique=False)
+    create_index_if_missing(op, op.f('ix_contact_settings_id'), 'contact_settings', ['id'], unique=False)
 
     # Create about_settings table
-    op.create_table('about_settings',
+    create_table_if_missing(op, 'about_settings',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('page_title', sa.String(length=200), nullable=True),
         sa.Column('page_description', sa.Text(), nullable=True),
@@ -47,7 +54,7 @@ def upgrade():
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
         sa.PrimaryKeyConstraint('id')
     )
-    op.create_index(op.f('ix_about_settings_id'), 'about_settings', ['id'], unique=False)
+    create_index_if_missing(op, op.f('ix_about_settings_id'), 'about_settings', ['id'], unique=False)
 
     # Insert default contact settings
     op.execute("""

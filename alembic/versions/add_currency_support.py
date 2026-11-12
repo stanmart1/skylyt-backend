@@ -6,17 +6,23 @@ Create Date: 2024-01-01 00:00:00.000000
 
 """
 from alembic import op
+from app.migration_helpers import (
+    table_exists, column_exists, add_column_if_missing,
+    create_table_if_missing, create_index_if_missing,
+    drop_column_if_exists, rename_column_if_exists,
+)
+
 import sqlalchemy as sa
 
 # revision identifiers
 revision = 'add_currency_support'
-down_revision = None  # Replace with actual previous revision
+down_revision = '00_baseline_schema'
 branch_labels = None
 depends_on = None
 
 def upgrade():
     # Create currency_rates table
-    op.create_table('currency_rates',
+    create_table_if_missing(op, 'currency_rates',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('from_currency', sa.String(length=3), nullable=False),
         sa.Column('to_currency', sa.String(length=3), nullable=False),
@@ -28,7 +34,7 @@ def upgrade():
     )
     
     # Create countries table
-    op.create_table('countries',
+    create_table_if_missing(op, 'countries',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('code', sa.String(length=2), nullable=False),
         sa.Column('name', sa.String(length=100), nullable=False),
@@ -41,10 +47,10 @@ def upgrade():
     )
     
     # Add currency fields to existing tables
-    op.add_column('bookings', sa.Column('currency_code', sa.String(length=3), nullable=True, default='NGN'))
-    op.add_column('bookings', sa.Column('exchange_rate', sa.Numeric(precision=10, scale=4), nullable=True, default=1.0))
-    op.add_column('hotels', sa.Column('base_currency', sa.String(length=3), nullable=True, default='NGN'))
-    op.add_column('cars', sa.Column('base_currency', sa.String(length=3), nullable=True, default='NGN'))
+    add_column_if_missing(op, 'bookings', sa.Column('currency_code', sa.String(length=3), nullable=True, default='NGN'))
+    add_column_if_missing(op, 'bookings', sa.Column('exchange_rate', sa.Numeric(precision=10, scale=4), nullable=True, default=1.0))
+    add_column_if_missing(op, 'hotels', sa.Column('base_currency', sa.String(length=3), nullable=True, default='NGN'))
+    add_column_if_missing(op, 'cars', sa.Column('base_currency', sa.String(length=3), nullable=True, default='NGN'))
     
     # Insert supported countries
     op.execute("""
@@ -59,19 +65,20 @@ def upgrade():
     
     # Insert initial exchange rates (placeholder values)
     op.execute("""
-        INSERT INTO currency_rates (from_currency, to_currency, rate) VALUES
-        ('NGN', 'USD', 0.0012),
-        ('NGN', 'GBP', 0.001),
-        ('NGN', 'EUR', 0.0011),
-        ('USD', 'NGN', 830.0),
-        ('GBP', 'NGN', 1000.0),
-        ('EUR', 'NGN', 910.0)
+        INSERT INTO currency_rates (from_currency, to_currency, rate, created_at, updated_at) VALUES
+        ('NGN', 'USD', 0.0012, NOW(), NOW()),
+        ('NGN', 'GBP', 0.001, NOW(), NOW()),
+        ('NGN', 'EUR', 0.0011, NOW(), NOW()),
+        ('USD', 'NGN', 830.0, NOW(), NOW()),
+        ('GBP', 'NGN', 1000.0, NOW(), NOW()),
+        ('EUR', 'NGN', 910.0, NOW(), NOW())
+        ON CONFLICT DO NOTHING
     """)
 
 def downgrade():
-    op.drop_column('cars', 'base_currency')
-    op.drop_column('hotels', 'base_currency')
-    op.drop_column('bookings', 'exchange_rate')
-    op.drop_column('bookings', 'currency_code')
+    drop_column_if_exists(op, 'cars', 'base_currency')
+    drop_column_if_exists(op, 'hotels', 'base_currency')
+    drop_column_if_exists(op, 'bookings', 'exchange_rate')
+    drop_column_if_exists(op, 'bookings', 'currency_code')
     op.drop_table('countries')
     op.drop_table('currency_rates')

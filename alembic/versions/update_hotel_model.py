@@ -6,6 +6,12 @@ Create Date: 2024-01-01 00:00:01.000000
 
 """
 from alembic import op
+from app.migration_helpers import (
+    table_exists, column_exists, add_column_if_missing,
+    create_table_if_missing, create_index_if_missing,
+    drop_column_if_exists, rename_column_if_exists,
+)
+
 import sqlalchemy as sa
 
 # revision identifiers
@@ -16,29 +22,30 @@ depends_on = None
 
 def upgrade():
     # Rename existing columns
-    op.alter_column('hotels', 'rating', new_column_name='star_rating')
-    op.alter_column('hotels', 'price', new_column_name='price_per_night')
+    # Rename legacy columns (no-op on schema created from the current models)
+    rename_column_if_exists(op, 'hotels', 'rating', 'star_rating')
+    rename_column_if_exists(op, 'hotels', 'price', 'price_per_night')
     
     # Add new columns
-    op.add_column('hotels', sa.Column('room_count', sa.Integer(), nullable=False, server_default='1'))
-    op.add_column('hotels', sa.Column('images', sa.JSON(), nullable=True))
-    op.add_column('hotels', sa.Column('features', sa.JSON(), nullable=True))
-    op.add_column('hotels', sa.Column('is_available', sa.Boolean(), nullable=False, server_default='true'))
-    op.add_column('hotels', sa.Column('is_featured', sa.Boolean(), nullable=False, server_default='false'))
+    add_column_if_missing(op, 'hotels', sa.Column('room_count', sa.Integer(), nullable=False, server_default='1'))
+    add_column_if_missing(op, 'hotels', sa.Column('images', sa.JSON(), nullable=True))
+    add_column_if_missing(op, 'hotels', sa.Column('features', sa.JSON(), nullable=True))
+    add_column_if_missing(op, 'hotels', sa.Column('is_available', sa.Boolean(), nullable=False, server_default='true'))
+    add_column_if_missing(op, 'hotels', sa.Column('is_featured', sa.Boolean(), nullable=False, server_default='false'))
     
     # Drop old column
-    op.drop_column('hotels', 'image_url')
+    drop_column_if_exists(op, 'hotels', 'image_url')
 
 def downgrade():
     # Add back old column
-    op.add_column('hotels', sa.Column('image_url', sa.String(), nullable=True))
+    add_column_if_missing(op, 'hotels', sa.Column('image_url', sa.String(), nullable=True))
     
     # Drop new columns
-    op.drop_column('hotels', 'is_featured')
-    op.drop_column('hotels', 'is_available')
-    op.drop_column('hotels', 'features')
-    op.drop_column('hotels', 'images')
-    op.drop_column('hotels', 'room_count')
+    drop_column_if_exists(op, 'hotels', 'is_featured')
+    drop_column_if_exists(op, 'hotels', 'is_available')
+    drop_column_if_exists(op, 'hotels', 'features')
+    drop_column_if_exists(op, 'hotels', 'images')
+    drop_column_if_exists(op, 'hotels', 'room_count')
     
     # Rename columns back
     op.alter_column('hotels', 'price_per_night', new_column_name='price')

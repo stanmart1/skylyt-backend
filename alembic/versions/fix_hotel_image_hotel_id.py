@@ -16,16 +16,12 @@ depends_on = None
 
 
 def upgrade():
-    # Change hotel_id column from Integer to String
-    op.alter_column('hotel_images', 'hotel_id',
-                    existing_type=sa.Integer(),
-                    type_=sa.String(),
-                    existing_nullable=False)
+    # NO-OP. hotel_images.hotel_id must stay Integer: it is a foreign key to
+    # hotels.id (Integer). Converting the column to String (as this revision
+    # originally did) makes the FK impossible to create, which in turn aborts
+    # Base.metadata.create_all() and left fresh databases without schema.
+    pass
 
 
 def downgrade():
-    # Change hotel_id column from String back to Integer
-    op.alter_column('hotel_images', 'hotel_id',
-                    existing_type=sa.String(),
-                    type_=sa.Integer(),
-                    existing_nullable=False)
+    pass

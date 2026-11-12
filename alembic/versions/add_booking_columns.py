@@ -6,6 +6,12 @@ Create Date: 2024-01-01 15:00:00.000000
 
 """
 from alembic import op
+from app.migration_helpers import (
+    table_exists, column_exists, add_column_if_missing,
+    create_table_if_missing, create_index_if_missing,
+    drop_column_if_exists, rename_column_if_exists,
+)
+
 import sqlalchemy as sa
 
 # revision identifiers
@@ -17,35 +23,35 @@ depends_on = None
 def upgrade():
     # Add missing columns to bookings table
     try:
-        op.add_column('bookings', sa.Column('hotel_name', sa.String(255), nullable=True))
+        add_column_if_missing(op, 'bookings', sa.Column('hotel_name', sa.String(255), nullable=True))
     except:
         pass
     try:
-        op.add_column('bookings', sa.Column('car_name', sa.String(255), nullable=True))
+        add_column_if_missing(op, 'bookings', sa.Column('car_name', sa.String(255), nullable=True))
     except:
         pass
     try:
-        op.add_column('bookings', sa.Column('check_in_date', sa.DateTime(), nullable=True))
+        add_column_if_missing(op, 'bookings', sa.Column('check_in_date', sa.DateTime(), nullable=True))
     except:
         pass
     try:
-        op.add_column('bookings', sa.Column('check_out_date', sa.DateTime(), nullable=True))
+        add_column_if_missing(op, 'bookings', sa.Column('check_out_date', sa.DateTime(), nullable=True))
     except:
         pass
     try:
-        op.add_column('bookings', sa.Column('total_amount', sa.Float(), nullable=True))
+        add_column_if_missing(op, 'bookings', sa.Column('total_amount', sa.Float(), nullable=True))
     except:
         pass
     try:
-        op.add_column('bookings', sa.Column('currency', sa.String(3), nullable=True))
+        add_column_if_missing(op, 'bookings', sa.Column('currency', sa.String(3), nullable=True))
     except:
         pass
     try:
-        op.add_column('bookings', sa.Column('booking_data', sa.JSON(), nullable=True))
+        add_column_if_missing(op, 'bookings', sa.Column('booking_data', sa.JSON(), nullable=True))
     except:
         pass
     try:
-        op.add_column('bookings', sa.Column('updated_at', sa.DateTime(), nullable=True))
+        add_column_if_missing(op, 'bookings', sa.Column('updated_at', sa.DateTime(), nullable=True))
     except:
         pass
     
@@ -55,11 +61,11 @@ def upgrade():
     op.execute("UPDATE bookings SET total_amount = 0 WHERE total_amount IS NULL")
 
 def downgrade():
-    op.drop_column('bookings', 'booking_data')
-    op.drop_column('bookings', 'currency')
-    op.drop_column('bookings', 'total_amount')
-    op.drop_column('bookings', 'check_out_date')
-    op.drop_column('bookings', 'check_in_date')
-    op.drop_column('bookings', 'car_name')
-    op.drop_column('bookings', 'hotel_name')
-    op.drop_column('bookings', 'updated_at')
+    drop_column_if_exists(op, 'bookings', 'booking_data')
+    drop_column_if_exists(op, 'bookings', 'currency')
+    drop_column_if_exists(op, 'bookings', 'total_amount')
+    drop_column_if_exists(op, 'bookings', 'check_out_date')
+    drop_column_if_exists(op, 'bookings', 'check_in_date')
+    drop_column_if_exists(op, 'bookings', 'car_name')
+    drop_column_if_exists(op, 'bookings', 'hotel_name')
+    drop_column_if_exists(op, 'bookings', 'updated_at')

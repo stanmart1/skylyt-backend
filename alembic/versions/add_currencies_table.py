@@ -6,19 +6,26 @@ Create Date: 2024-01-01 00:00:00.000000
 
 """
 from alembic import op
+
+from app.migration_helpers import (
+    table_exists, column_exists, add_column_if_missing,
+    create_table_if_missing, create_index_if_missing,
+    drop_column_if_exists, rename_column_if_exists,
+)
+
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers
 revision = 'add_currencies_table'
-down_revision = None
+down_revision = '00_baseline_schema'
 branch_labels = None
 depends_on = None
 
 
 def upgrade():
     # Create currencies table
-    op.create_table('currencies',
+    create_table_if_missing(op, 'currencies',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
@@ -29,8 +36,8 @@ def upgrade():
         sa.Column('is_active', sa.Boolean(), nullable=False),
         sa.PrimaryKeyConstraint('id')
     )
-    op.create_index('idx_currency_code_active', 'currencies', ['code', 'is_active'])
-    op.create_index(op.f('ix_currencies_code'), 'currencies', ['code'], unique=True)
+    create_index_if_missing(op, 'idx_currency_code_active', 'currencies', ['code', 'is_active'])
+    create_index_if_missing(op, op.f('ix_currencies_code'), 'currencies', ['code'], unique=True)
 
 
 def downgrade():
